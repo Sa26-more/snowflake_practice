@@ -1,0 +1,191 @@
+// Example 1: Checking the status of an asynchronous child job
+CREATE OR REPLACE PROCEDURE checkStatus()
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = 3.8
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER='async_handler'
+EXECUTE AS CALLER
+AS $$
+def async_handler(session):
+    async_job = session.sql("select system$wait(60)").collect_nowait()
+    return async_job.is_done()
+$$;
+
+CALL checkStatus();
+// False
+
+
+CREATE OR REPLACE PROCEDURE checkStatus1()
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = 3.8
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER='async_handler'
+EXECUTE AS CALLER
+AS $$
+def async_handler(session):
+  async_job = session.sql("select system$wait(60)").collect_nowait()
+  if async_job.is_done():
+    return "Job finished successfully!"  # Return "True" or a success message
+  else:
+    return "Job timed out or failed."  # Handle failure scenario (optional)
+$$;
+
+CALL checkStatus1();
+
+--Use the following SQL to find out the latest available version
+select * from information_schema.packages where package_name = 'snowflake-snowpark-python' order by version desc;
+
+// Example 3
+
+CREATE OR REPLACE TABLE employees(id NUMBER, name VARCHAR, role VARCHAR);
+INSERT INTO employees (id, name, role) VALUES (1, 'Alice', 'op'), (2, 'Bob', 'dev'), (3, 'Cindy', 'dev');
+
+// Specifying return column names and types
+CREATE OR REPLACE PROCEDURE filterByRole(tableName VARCHAR, role VARCHAR)
+RETURNS TABLE(id NUMBER, name VARCHAR, role VARCHAR)
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.8'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'filter_by_role'
+AS
+$$
+from snowflake.snowpark.functions import col
+
+def filter_by_role(session, table_name, role):
+   df = session.table(table_name)
+   return df.filter(col("role") == role)
+$$;
+
+CALL filterByRole('employees', 'dev');
+
+-- Omitting return column names and types
+CREATE OR REPLACE PROCEDURE filterByRole(tableName VARCHAR, role VARCHAR)
+RETURNS TABLE()
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.8'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'filter_by_role'
+AS
+$$
+from snowflake.snowpark.functions import col
+
+def filter_by_role(session, table_name, role):
+  df = session.table(table_name)
+  return df.filter(col("role") == role)
+$$;
+
+CALL filterByRole('employees', 'dev');
+
+-- Select the filtered records
+SELECT * FROM PROCEDURE.STORED.SOURCE_CUSTOMER; --C_NATIONKEY
+
+CREATE OR REPLACE PROCEDURE filterByRole(tableName VARCHAR, L_LINENUMBER VARCHAR)
+RETURNS TABLE()
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.8'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'filter_by_role'
+AS
+$$
+from snowflake.snowpark.functions import col
+
+def filter_by_role(session, table_name, L_LINENUMBER):
+  df = session.table(table_name)
+  return df.filter(col("L_LINENUMBER") == L_LINENUMBER)
+$$;
+
+CALL filterByRole('SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.LINEITEM', '5'); --4.4s 643.3k
+
+SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.LINEITEM WHERE L_LINENUMBER = '1'; --2.1s 1.5 m
+
+// Example 2
+//Running concurrent tasks with worker processes
+// Snowflake recommends that you not use the built-in Python multiprocessing module.
+CREATE OR REPLACE PROCEDURE joblib_multiprocessing_proc(i INT)
+  RETURNS STRING
+  LANGUAGE PYTHON
+  RUNTIME_VERSION = 3.8
+  HANDLER = 'joblib_multiprocessing'
+  PACKAGES = ('snowflake-snowpark-python', 'joblib')
+AS $$
+import joblib
+from math import sqrt
+
+def joblib_multiprocessing(session, i):
+  result = joblib.Parallel(n_jobs=-1)(joblib.delayed(sqrt)(i ** 2) for i in range(10))
+  return str(result)
+$$;
+CALL joblib_multiprocessing_proc(4);
+
+DROP PROCEDURE joblib_multiprocessing_proc(INT); --Mention argument type
+
+
+
+// Waiting and blocking while an asynchronous child job runs
+CREATE OR REPLACE PROCEDURE blockUntilDone()
+RETURNS VARCHAR
+LANGUAGE PYTHON
+RUNTIME_VERSION = 3.8
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER='async_handler'
+EXECUTE AS CALLER
+AS $$
+def async_handler(session):
+    async_job = session.sql("select system$wait(5)").collect_nowait()
+    return async_job.result()
+$$;
+CALL blockUntilDone();
+
+
+
+// You manage a customer database in Snowflake and need a procedure to calculate and update a customer's total order value. 
+// This value should be the sum of all their order amounts.
+CREATE OR REPLACE PROCEDURE update_customer_total_order_value(L_LINENUMBER INT)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = 3.8
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'update_handler'
+EXECUTE AS CALLER
+AS
+$$
+import snowflake.snowpark as sp
+
+def update_handler(session: sp.Session, L_LINENUMBER: int) -> str:
+    try:
+        # Execute the query to get the total value
+        result = session.sql(f"""
+            SELECT L_LINENUMBER, SUM(L_EXTENDEDPRICE) 
+            FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.LINEITEM 
+            WHERE L_LINENUMBER = {L_LINENUMBER}
+            GROUP BY L_LINENUMBER
+        """).collect()
+
+        if not result:
+            return f"No records found for L_LINENUMBER {L_LINENUMBER}"
+        
+        number, total_value = result[0][0], result[0][1]
+
+        # Insert the result into the target table
+        session.sql(f"""
+            INSERT INTO PROCEDURE.STORED.LINEITEM (L_LINENUMBER, L_EXTENDEDPRICE) 
+            VALUES ({number}, {total_value})
+        """).collect()
+
+        return f"Total order value for L_LINENUMBER {L_LINENUMBER} updated successfully!"
+
+    except Exception as e:
+        return f"Error updating total order value for L_LINENUMBER {L_LINENUMBER}: {str(e)}"
+
+$$;
+
+CALL update_customer_total_order_value(6);
+
+SELECT * FROM PROCEDURE.STORED.LINEITEM;
+
+CREATE OR REPLACE TABLE PROCEDURE.STORED.LINEITEM
+(L_LINENUMBER NUMBER(38,0), L_EXTENDEDPRICE NUMBER(20,2));
+
+TRUNCATE TABLE PROCEDURE.STORED.LINEITEM;
