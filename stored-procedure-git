@@ -1,0 +1,75 @@
+CREATE OR REPLACE DATABASE PROCEDURE;
+
+CREATE OR REPLACE SCHEMA PROCEDURE.STORED;
+
+USE SCHEMA PROCEDURE.STORED;
+
+// Create API integration for git and then create git repository
+CREATE OR REPLACE API INTEGRATION git_api_integration
+  API_PROVIDER = git_https_api
+  API_ALLOWED_PREFIXES = ('https://github.com/Sa26-more')
+  ENABLED = TRUE;
+
+CREATE GIT REPOSITORY snowflake_practice
+    ORIGIN = 'https://github.com/Sa26-more/snowflake_practice.git'
+    API_INTEGRATION = 'GIT_API_INTEGRATION';
+
+
+// Create a source table from snowflake sample database table
+
+CREATE OR REPLACE TABLE PROCEDURE.STORED.SOURCE_CUSTOMER
+AS
+SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER;
+
+// Create aprocedure to copy data from one table and insert into another table.
+CREATE OR REPLACE PROCEDURE INSERT_DATA (SOURCE_TABLE STRING, SINK_TABLE STRING, COUNT INT)
+RETURNS STRING
+LANGUAGE Python
+RUNTIME_VERSION = '3.8'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'run'
+AS
+$$
+def run(session, SOURCE_TABLE, SINK_TABLE, count):
+  session.table(SOURCE_TABLE).limit(count).write.save_as_table(SINK_TABLE)
+  return "SUCCESS"
+$$;
+
+TRUNCATE TABLE PROCEDURE.STORED.SINK_CUSTOMER1;
+// TRUNCATE operation took 148 ms for small table.
+DROP TABLE PROCEDURE.STORED.SINK_CUSTOMER1;
+// DROP operation took 88 ms for small table.
+DELETE FROM PROCEDURE.STORED.SINK_CUSTOMER1;
+// DELETE operation took 447 ms for small table.
+
+TRUNCATE TABLE PROCEDURE.STORED.SINK_CUSTOMER;
+// Call the procedure
+CALL INSERT_DATA('SOURCE_CUSTOMER', 'SINK_CUSTOMER', 1000);
+
+//In the above stored procedure call, we can insert data in same table multiple times. If sink table exist it will throw error (even for empty table also).
+
+// Check the data in the sink table
+SELECT * FROM PROCEDURE.STORED.SOURCE_CUSTOMER;
+SELECT * FROM PROCEDURE.STORED.SINK_CUSTOMER1;
+
+ALTER GIT REPOSITORY snowflake_practice FETCH;
+
+SHOW GIT BRANCHES IN snowflake_practice;
+
+DESCRIBE GIT REPOSITORY snowflake_practice;
+
+EXECUTE IMMEDIATE FROM @snowflake_practice/branches/main/sql/stored_procedure_practice.sql;
+
+/*
+This topic describes limitations for using Git repositories from within Snowflake.
+
+    Interaction between Snowflake and a Git repository is currently read-only, in which repository files may be read from the repository, but not written to it.
+
+    Access to Git repositories from Snowflake is supported only over the public internet. For example, access is not supported to repositories that are behind a private network.
+
+    Sharing repository stages is not supported through data sharing or apps built on the Snowflake Native App Framework.
+
+    Creating repository stages inside application packages is not supported and might be blocked in the future.
+
+    Creating repository stages inside native applications on the consumer side is not supported.
+*/
